@@ -218,6 +218,10 @@ class TagEditorApp:
         )
         self.next_button.grid(row=cr, column=1, sticky="ew")
 
+        self.skip_enabled = tk.BooleanVar(value=False)
+        self.skip_is_written_check = ttk.Checkbutton(self.controls_tag_editor, text="Skip the check on << and >> buttons", variable=self.skip_enabled)
+        self.skip_is_written_check.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
+
         # Recent Tags Panel (Column 1)
         self.recent_tags: list[str] = []
         self.recent_frame = ttk.Frame(self.root)
@@ -291,13 +295,23 @@ class TagEditorApp:
                 self.curent_selected_listbox = None
         self.root.focus_force()
 
-    def next_person(self):
+    def _is_written_for_all_elements_warning(self) -> bool:
+        if self.skip_enabled.get():
+            return True
+
+        is_writen = True
         for ele in self.cache_view_of_person_faces[self.index].elements:
             if ele.is_writen == False:
                 tkinter.messagebox.showinfo(
                     "Non writen data", "Write all data before proceeding"
                 )
-                return
+                is_writen = False
+                break
+        return is_writen
+
+    def next_person(self):
+        if self._is_written_for_all_elements_warning() == False:
+            return
 
         if self.curent_selected_listbox is not None:
             self.curent_selected_listbox.config(background=self.defaultbg)
@@ -307,13 +321,9 @@ class TagEditorApp:
             self.show_person()
 
     def prev_person(self):
-        for ele in self.cache_view_of_person_faces[self.index].elements:
-            if ele.is_writen == False:
-                tkinter.messagebox.showinfo(
-                    "Non writen data", "Write all data before proceeding"
-                )
+        if self._is_written_for_all_elements_warning() == False:
                 return
-
+    
         if self.curent_selected_listbox is not None:
             self.curent_selected_listbox.config(background=self.defaultbg)
         self.curent_selected_listbox = None
