@@ -297,6 +297,7 @@ class TagEditorApp:
 
     def _is_written_for_all_elements_warning(self) -> bool:
         if self.skip_enabled.get():
+            self.skip_enabled.set(False)
             return True
 
         is_writen = True
@@ -405,8 +406,6 @@ class TagEditorApp:
             pilimg = PIL.Image.open(path)
             pil_img = PIL.ImageOps.exif_transpose(pilimg)
             img_width, img_height = pil_img.size
-
-            print(type(facebox))
 
             (x1, y1, x2, y2) = facebox[0], facebox[1], facebox[2], facebox[3]
 
