@@ -284,7 +284,11 @@ class TagEditorApp:
     def remove_selected(self):
         if self.curent_selected_listbox is not None:
             selection = self.curent_selected_listbox.curselection()
-            self.curent_selected_listbox.delete(selection)
+            print(selection)
+            if selection:
+                self.curent_selected_listbox.delete(selection)
+                self.curent_selected_listbox.config(background=self.defaultbg)
+                self.curent_selected_listbox = None
 
     def next_person(self):
         for ele in self.cache_view_of_person_faces[self.index].elements:
