@@ -243,7 +243,7 @@ class TagEditorApp:
         self.cache_view_of_person_faces: list[View] = []
         self.index = 0
 
-        self.parce_npz_file(selected_npz_file)
+        self.load_npz_file(selected_npz_file)
         self.show_person()
 
     def add_tag(self):
@@ -296,7 +296,8 @@ class TagEditorApp:
 
     def _is_written_for_all_elements_warning(self) -> bool:
         if self.skip_enabled.get():
-            self.skip_enabled.set(False)
+            if not self.skip_is_written_check.instate(["disabled"]):
+                self.skip_enabled.set(False)
             return True
 
         is_writen = True
@@ -467,7 +468,7 @@ class TagEditorApp:
         self.curent_selected_listbox = e.widget
         self.curent_selected_listbox.config(background="#FF9797")
 
-    def parce_npz_file(
+    def load_npz_file(
         self,
         npz_path: str | pathlib.Path,
         eps: float = 0.4,
@@ -506,6 +507,8 @@ class TagEditorApp:
                     person.face_box.append(box)
                 self.persons.append(person)
         else:
+            self.skip_enabled.set(True)
+            self.skip_is_written_check.state(["disabled"])
             for idx in range(len(image_paths)):
                 path: str = str(image_paths[idx])
                 box: np.ndarray = bboxes[idx]
