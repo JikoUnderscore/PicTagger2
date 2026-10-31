@@ -133,7 +133,7 @@ def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False)
 
     # Save efficiently into a compressed binary NumPy archive (.npz)
 
-    output_filename: str = f"face_embeddings_{target_dir.name}.npz"
+    output_filename: str = f"{target_dir.name}_faces_database.npz"
     print(f"\nSaving binary face database to {output_filename}...")
 
     np.savez_compressed(
@@ -144,7 +144,7 @@ def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False)
     )
 
     np.savez_compressed(
-        f"noface_images_paths_{target_dir.name}",
+        f"{target_dir.name}_noface_images_paths",
         paths=np.array(nofaces_paths),
     )
 
