@@ -286,9 +286,10 @@ class TagEditorApp:
             selection = self.curent_selected_listbox.curselection()
             print(selection)
             if selection:
-                self.curent_selected_listbox.delete(selection)
                 self.curent_selected_listbox.config(background=self.defaultbg)
+                self.curent_selected_listbox.delete(selection)
                 self.curent_selected_listbox = None
+        self.root.focus_force()
 
     def next_person(self):
         for ele in self.cache_view_of_person_faces[self.index].elements:
