@@ -3,6 +3,7 @@ import sys
 
 import cv2
 import insightface.app
+import insightface.app.person
 import numpy as np
 import onnxruntime
 import sklearn.cluster
@@ -23,7 +24,7 @@ def cluster_faces(
         return
 
     print(f"Loading embeddings from {npz_path}...")
-    data = np.load(file_path, allow_pickle=True)
+    data: dict[str, np.ndarray] = np.load(file_path, allow_pickle=True)
 
     image_paths: np.ndarray = data["paths"]
     bboxes: np.ndarray = data["bboxes"]
@@ -69,9 +70,7 @@ def cluster_faces(
 onnxruntime.preload_dlls()
 
 
-
-
-def process_image_folder(folder_path, use_gpu=False):
+def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False):
     name = "antelopev2"
     print(f"Initializing InsightFace ({name})...")
     ctx_id = 0 if use_gpu else -1  # 0 for CUDA/GPU, -1 for CPU-only execution
@@ -100,11 +99,10 @@ def process_image_folder(folder_path, use_gpu=False):
 
     print(f"Progress: 0% (0/{image_files_len})")
     for i, img_path in enumerate(image_files):
-        
         if (i + 1) % interval == 0 or (i + 1) == image_files_len:
             percent = int(((i + 1) / image_files_len) * 100)
             print(f"Progress: {percent}% ({i + 1}/{image_files_len})")
-        
+
         # print(f"Scanning: {img_path.name}")
         try:
             # Read image with OpenCV
@@ -112,15 +110,19 @@ def process_image_folder(folder_path, use_gpu=False):
             img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
 
             if img is None:
-                print(f"  -> Warning: Failed to read image (file may be corrupt). {str(img_path)}")
+                print(
+                    f"  -> Warning: Failed to read image (file may be corrupt). {img_path!s}"
+                )
                 continue
 
             # Detect faces and extract embeddings
-            faces = app.get(img)
+            faces: list[insightface.app.person.Face] = app.get(img)
             # print(f"  -> Detected {len(faces)} face(s).")
             if len(faces) == 0:
                 nofaces_paths.append(str(img_path))
             else:
+                print(type(faces[0]))
+
                 for face in faces:
                     image_paths.append(str(img_path))
                     bboxes.append(face.bbox.tolist())  # [x1, y1, x2, y2]
@@ -134,7 +136,6 @@ def process_image_folder(folder_path, use_gpu=False):
     output_filename: str = f"face_embeddings_{target_dir.name}.npz"
     print(f"\nSaving binary face database to {output_filename}...")
 
-
     np.savez_compressed(
         output_filename,
         paths=np.array(image_paths),
@@ -142,28 +143,27 @@ def process_image_folder(folder_path, use_gpu=False):
         embeddings=np.array(embeddings, dtype=np.float32),
     )
 
-
     np.savez_compressed(
         f"noface_images_paths_{target_dir.name}",
         paths=np.array(nofaces_paths),
     )
 
     print(
-        f"Processing complete! Saved {len(embeddings)} total faces across "
-        f"~{len(image_paths)} images into {output_filename}."
+        f"Processing complete! Saved {len(embeddings)} total faces across ~{len(image_paths)} images into {output_filename}."
     )
+
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: python main.py <directory>")
         return
-    
+
     # Change this to the path of your photo folder
     target_folder = sys.argv[1]
 
-
     process_image_folder(target_folder, use_gpu=True)
     # cluster_faces(npz_path="face_embeddings.npz", eps=0.4, min_samples=2)
+
 
 if __name__ == "__main__":
     main()

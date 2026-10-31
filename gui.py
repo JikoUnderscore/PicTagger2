@@ -150,7 +150,9 @@ def read_tags(filepath: str, et: exiftool.ExifToolHelper) -> list[str]:
 
 @typing.final
 class TagEditorApp:
-    def __init__(self, root: tk.Tk, et: exiftool.ExifToolHelper, selected_npz_file: str):
+    def __init__(
+        self, root: tk.Tk, et: exiftool.ExifToolHelper, selected_npz_file: str
+    ):
         self.root = root
         root.geometry("1280x720")
         root.title("Tag Editor")
@@ -158,11 +160,10 @@ class TagEditorApp:
         self.defaultbg = root.cget("bg")
         self.curent_selected_listbox: tk.Listbox | None = None
 
-        # Configure root window grid weights so column 2 (images) expands to fill the window
         root.rowconfigure(0, weight=1)
-        root.columnconfigure(0, weight=0)  # Tag editor controls
-        root.columnconfigure(1, weight=0)  # Recent tags
-        root.columnconfigure(2, weight=1)  # Image view area (expands)
+        root.columnconfigure(0, weight=0)
+        root.columnconfigure(1, weight=0)
+        root.columnconfigure(2, weight=1)
 
         # Tag Editor Panel (Column 0)
         self.controls_tag_editor = ttk.Frame(root)
@@ -319,7 +320,7 @@ class TagEditorApp:
         for ele in self.cache_view_of_person_faces[self.index].elements:
             filepath = ele.person_faces_path
             args_path: str
-            
+
             with tempfile.NamedTemporaryFile(
                 mode="wt", encoding="utf-8", delete=False
             ) as argsf:
@@ -502,7 +503,10 @@ def main():
 
     selectec_npz_file = tkinter.filedialog.askopenfile(title="Pick a npz file")
     if selectec_npz_file is None or not selectec_npz_file.name.endswith(".npz"):
-        tkinter.messagebox.showerror("Pick a valid npz file", "Run `python main.py <folder>`, it will generate a valid file")
+        tkinter.messagebox.showerror(
+            "Pick a valid npz file",
+            "Run `python main.py <folder>`, it will generate a valid file",
+        )
         return
 
     with exiftool.ExifToolHelper() as et:
