@@ -304,7 +304,7 @@ class TagEditorApp:
         for ele in self.cache_view_of_person_faces[self.index].elements:
             if ele.is_writen == False:
                 tkinter.messagebox.showinfo(
-                    "Non writen data", "Write all data before proceeding"
+                    "Non writen data", "Write all data before proceeding, OR check the checkbox"
                 )
                 is_writen = False
                 break
