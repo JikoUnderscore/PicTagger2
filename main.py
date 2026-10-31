@@ -93,25 +93,38 @@ def process_image_folder(folder_path, use_gpu=False):
     bboxes: list[list[float]] = []
     embeddings: list[list[float]] = []
 
-    for img_path in image_files:
-        print(f"Scanning: {img_path.name}")
+    nofaces_paths: list[str] = []
+
+    image_files_len = len(image_files)
+    interval = max(1, image_files_len // 20)
+
+    print(f"Progress: 0% (0/{image_files_len})")
+    for i, img_path in enumerate(image_files):
+        
+        if (i + 1) % interval == 0 or (i + 1) == image_files_len:
+            percent = int(((i + 1) / image_files_len) * 100)
+            print(f"Progress: {percent}% ({i + 1}/{image_files_len})")
+        
+        # print(f"Scanning: {img_path.name}")
         try:
             # Read image with OpenCV
             image_bytes = np.fromfile(str(img_path), dtype=np.uint8)
             img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
 
             if img is None:
-                print("  -> Warning: Failed to read image (file may be corrupt).")
+                print(f"  -> Warning: Failed to read image (file may be corrupt). {str(img_path)}")
                 continue
 
             # Detect faces and extract embeddings
             faces = app.get(img)
-            print(f"  -> Detected {len(faces)} face(s).")
-
-            for face in faces:
-                image_paths.append(str(img_path))
-                bboxes.append(face.bbox.tolist())  # [x1, y1, x2, y2]
-                embeddings.append(face.embedding.tolist())  # 512-dim vector
+            # print(f"  -> Detected {len(faces)} face(s).")
+            if len(faces) == 0:
+                nofaces_paths.append(str(img_path))
+            else:
+                for face in faces:
+                    image_paths.append(str(img_path))
+                    bboxes.append(face.bbox.tolist())  # [x1, y1, x2, y2]
+                    embeddings.append(face.embedding.tolist())  # 512-dim vector
 
         except Exception as e:  # noqa: BLE001
             print(f"  -> Error during processing: {e}")
@@ -129,9 +142,15 @@ def process_image_folder(folder_path, use_gpu=False):
         embeddings=np.array(embeddings, dtype=np.float32),
     )
 
+
+    np.savez_compressed(
+        f"noface_images_paths_{target_dir.name}",
+        paths=np.array(nofaces_paths),
+    )
+
     print(
         f"Processing complete! Saved {len(embeddings)} total faces across "
-        f"{len(set(image_paths))} images into {output_filename}."
+        f"~{len(image_paths)} images into {output_filename}."
     )
 
 def main():
