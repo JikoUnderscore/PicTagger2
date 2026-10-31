@@ -21,7 +21,7 @@ pip install requirements.txt
 python main.py <path/to/folder/with/picture/with/subfolders>
 python gui.py
 ```
-if you have a probelems with `antelopev2` go to `~/.insightface\models\antelopev2\antelopev2` and move the file one directory back i.e., move them to `~/.insightface\models\antelopev2`
+if you have a probelems with `antelopev2` go to `~/.insightface\models\antelopev2\antelopev2` and move the files one directory back i.e., move them to `~/.insightface\models\antelopev2`
 
 
 
