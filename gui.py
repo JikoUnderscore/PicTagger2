@@ -288,7 +288,6 @@ class TagEditorApp:
     def remove_selected(self):
         if self.curent_selected_listbox is not None:
             selection = self.curent_selected_listbox.curselection()
-            print(selection)
             if selection:
                 self.curent_selected_listbox.config(background=self.defaultbg)
                 self.curent_selected_listbox.delete(selection)
@@ -479,31 +478,39 @@ class TagEditorApp:
 
         image_paths: np.ndarray = data["paths"]
         bboxes: np.ndarray = data["bboxes"]
-        embeddings: np.ndarray = data["embeddings"]
 
-        if len(embeddings) == 0:
-            raise Exception("No face embeddings found in the database.")  # noqa: TRY002
+        if "embeddings" in data:
+            embeddings: np.ndarray = data["embeddings"]
 
-        clt = sklearn.cluster.DBSCAN(eps=eps, min_samples=min_samples, metric="cosine")
-        clt.fit(embeddings)
+            if len(embeddings) == 0:
+                raise Exception("No face embeddings found in the database.")  # noqa: TRY002
 
-        labels: np.ndarray = clt.labels_
-        unique_labels: list[int] = sorted(set(labels))
+            clt = sklearn.cluster.DBSCAN(eps=eps, min_samples=min_samples, metric="cosine")
+            clt.fit(embeddings)
 
-        for label in unique_labels:
-            if label == -1:
-                continue
+            labels: np.ndarray = clt.labels_
+            unique_labels: list[int] = sorted(set(labels))
 
-            indices: np.ndarray = np.where(labels == label)[0]
-            print(f"👤 Person #{label} ({len(indices)} images):")
+            for label in unique_labels:
+                if label == -1:
+                    continue
 
-            person = PersonFaces([], [])
-            for idx in indices:
+                indices: np.ndarray = np.where(labels == label)[0]
+                print(f"👤 Person #{label} ({len(indices)} images):")
+
+                person = PersonFaces([], [])
+                for idx in indices:
+                    path: str = str(image_paths[idx])
+                    box: np.ndarray = bboxes[idx]
+                    person.path.append(path)
+                    person.face_box.append(box)
+                self.persons.append(person)
+        else:
+            for idx in range(len(image_paths)):
                 path: str = str(image_paths[idx])
                 box: np.ndarray = bboxes[idx]
-                person.path.append(path)
-                person.face_box.append(box)
-            self.persons.append(person)
+                self.persons.append(PersonFaces([path], [box]))
+
 
 
 def view_full_image_of_face(e: tk.Event[ttk.Label], views: list[View], index: int):

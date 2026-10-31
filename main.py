@@ -6,6 +6,10 @@ import insightface.app
 import insightface.app.person
 import numpy as np
 import onnxruntime
+import PIL.Image
+import PIL.ImageFile
+import PIL.ImageOps
+import PIL.ImageTk
 import sklearn.cluster
 
 
@@ -93,6 +97,7 @@ def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False)
     embeddings: list[list[float]] = []
 
     nofaces_paths: list[str] = []
+    nofaces_bboxes: list[tuple[int, int, int, int]] = []
 
     image_files_len = len(image_files)
     interval = max(1, image_files_len // 20)
@@ -105,9 +110,17 @@ def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False)
 
         # print(f"Scanning: {img_path.name}")
         try:
-            # Read image with OpenCV
-            image_bytes = np.fromfile(str(img_path), dtype=np.uint8)
-            img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
+            pil_img: PIL.ImageFile.ImageFile
+            with open(img_path, "rb") as f:
+                pil_img = PIL.Image.open(f)
+                pil_img.load()
+
+            pilimg = PIL.ImageOps.exif_transpose(pil_img)
+            pilimg = pilimg.convert("RGB")
+
+            img = cv2.cvtColor(np.array(pilimg), cv2.COLOR_RGB2BGR)
+            # image_bytes = np.fromfile(str(img_path), dtype=np.uint8)
+            # img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
 
             if img is None:
                 print(
@@ -119,10 +132,10 @@ def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False)
             faces: list[insightface.app.person.Face] = app.get(img)
             # print(f"  -> Detected {len(faces)} face(s).")
             if len(faces) == 0:
+                img_size = pilimg.size
                 nofaces_paths.append(str(img_path))
+                nofaces_bboxes.append((0, 0, img_size[0], img_size[1]))
             else:
-                print(type(faces[0]))
-
                 for face in faces:
                     image_paths.append(str(img_path))
                     bboxes.append(face.bbox.tolist())  # [x1, y1, x2, y2]
@@ -144,8 +157,9 @@ def process_image_folder(folder_path: str | pathlib.Path, use_gpu: bool = False)
     )
 
     np.savez_compressed(
-        f"{target_dir.name}_noface_images_paths",
+        f"{target_dir.name}_noface_images_paths.npz",
         paths=np.array(nofaces_paths),
+        bboxes=np.array(nofaces_bboxes, dtype=np.float32),
     )
 
     print(
