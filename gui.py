@@ -21,6 +21,8 @@ PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class ScrollableFrame(ttk.Frame):
+    _items_per_frame = 40
+
     def __init__(
         self,
         parent: ttk.Widget,
@@ -37,32 +39,51 @@ class ScrollableFrame(ttk.Frame):
         self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
 
-        self.content_frame = ttk.Frame(self.canvas)
-        self.canvas_window = self.canvas.create_window(
-            (0, 0), window=self.content_frame, anchor="nw"
-        )
+        self.content_windows: list[tuple[ttk.Frame, int]] = []
+        self._layout_pending = False
 
-        # Event bindings
-        _ = self.content_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")),
-        )
-        _ = self.canvas.bind(
-            "<Configure>",
-            lambda e: self.canvas.itemconfigure(
-                self.canvas_window,
-                width=e.width,
-            ),
-        )
+        def resize_content(event: tk.Event) -> None:
+            for _, window in self.content_windows:
+                self.canvas.itemconfigure(window, width=event.width)
+            self._schedule_layout()
 
-        # Mouse wheel scrolling
-        _ = self.content_frame.bind(
-            "<MouseWheel>", lambda e: self.canvas.yview_scroll(-e.delta // 60, "units")
-        )
-        _ = self.canvas.bind(
-            "<MouseWheel>", lambda e: self.canvas.yview_scroll(-e.delta // 60, "units")
-        )
+        _ = self.canvas.bind("<Configure>", resize_content)
 
+    def content_location(self, item_index: int) -> tuple[ttk.Frame, int]:
+        if item_index < 0:
+            raise ValueError("item_index must be non-negative")
+
+        frame_index, row = divmod(item_index, self._items_per_frame)
+        while frame_index >= len(self.content_windows):
+            self._add_content_frame()
+        return self.content_windows[frame_index][0], row
+
+    def _add_content_frame(self) -> None:
+        frame = ttk.Frame(self.canvas)
+        window = self.canvas.create_window((0, 0), window=frame, anchor="nw")
+        self.content_windows.append((frame, window))
+        _ = frame.bind("<Configure>", self._schedule_layout)
+        self._schedule_layout()
+
+    def _schedule_layout(self, _event: tk.Event | None = None) -> None:
+        if self._layout_pending:
+            return
+        self._layout_pending = True
+        self.after_idle(self._layout_content_frames)
+
+    def _layout_content_frames(self) -> None:
+        self._layout_pending = False
+        content_y = 0
+        canvas_width = self.canvas.winfo_width()
+
+        for frame, window in self.content_windows:
+            self.canvas.itemconfigure(window, width=canvas_width)
+            self.canvas.coords(window, 0, content_y)
+            content_y += frame.winfo_reqheight()
+
+        self.canvas.configure(
+            scrollregion=(0, 0, canvas_width, content_y)
+        )
 
 @dataclasses.dataclass(slots=True)
 class PersonFaces:
@@ -154,6 +175,7 @@ class TagEditorApp:
         self, root: tk.Tk, et: exiftool.ExifToolHelper, selected_npz_file: str
     ):
         self.root = root
+        _ = root.bind_all("<MouseWheel>", self._scroll_person_canvas)
         root.geometry("1280x720")
         root.title("Tag Editor")
         self.et = et
@@ -245,6 +267,15 @@ class TagEditorApp:
 
         self.load_npz_file(selected_npz_file)
         self.show_person()
+
+    def _scroll_person_canvas(self, event: tk.Event[tk.Misc]) -> str | None:
+        widget: tk.Misc | None = event.widget
+        while widget is not None:
+            if isinstance(widget, ScrollableFrame):
+                widget.canvas.yview_scroll(-event.delta // 60, "units")
+                return "break"
+            widget = widget.master
+        return None
 
     def add_tag(self):
         tag = self.entry_var.get().strip()
@@ -373,9 +404,9 @@ class TagEditorApp:
         # # print(f"Done {filepath}")
 
     def show_person(self):
-        for view in self.cache_view_of_person_faces:
-            if self.index == view.index:
-                view.frame.tkraise()
+        for cached_view in self.cache_view_of_person_faces:
+            if self.index == cached_view.index:
+                cached_view.frame.tkraise()
                 return
 
         person = self.persons[self.index]
@@ -386,8 +417,6 @@ class TagEditorApp:
         pview.columnconfigure(0, weight=1)
         scroll = ScrollableFrame(pview)
         scroll.pack(fill="both", expand=True)
-
-        view = scroll.content_frame
 
         # _ = view.bind(
         #     "<MouseWheel>", lambda e: scroll.canvas.yview_scroll(-e.delta // 60, "units")
@@ -400,9 +429,13 @@ class TagEditorApp:
         # )
 
         elements: list[ImageElentData] = []
-        row = 0
+        section_frame: ttk.Frame | None = None
         # facebox: np.ndarray[np._any, np.dtype[np.float32]]
-        for path, facebox in zip(person.path, person.face_box):
+        assert len(person.path) == len(person.face_box)
+
+        for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
+            section_frame, section_row = scroll.content_location(row)
+
             pilimg = PIL.Image.open(path)
             pil_img = PIL.ImageOps.exif_transpose(pilimg)
             img_width, img_height = pil_img.size
@@ -424,15 +457,13 @@ class TagEditorApp:
             img = resize_image(face_crop, 320, 200)
             tk_image_data = PIL.ImageTk.PhotoImage(img)
 
-            col = 0
             image_label = ttk.Label(
-                view, text=path, image=tk_image_data, compound="top"
+                section_frame, text=path, image=tk_image_data, compound="top"
             )
-            image_label.grid(row=row, column=col, padx=10)
+            image_label.grid(row=section_row, column=0, padx=10)
 
-            image_tag_list = tk.Listbox(view, height=10)
-            image_tag_list.grid(row=row, column=(col := col + 1), padx=10)
-            row += 1  # noqa: SIM113
+            image_tag_list = tk.Listbox(section_frame, height=10)
+            image_tag_list.grid(row=section_row, column=1, padx=10)
 
             current_tags = read_tags(path, self.et)
             image_tag_list.delete(0, "end")
@@ -448,11 +479,6 @@ class TagEditorApp:
                 lambda e: view_full_image_of_face(
                     e, self.cache_view_of_person_faces, self.index
                 ),
-            )
-
-            _ = image_label.bind(
-                "<MouseWheel>",
-                lambda e: scroll.canvas.yview_scroll(-e.delta // 60, "units"),
             )
 
             elements.append(
@@ -472,7 +498,6 @@ class TagEditorApp:
         self,
         npz_path: str | pathlib.Path,
         eps: float = 0.4,
-        min_samples: int = 1,
     ):
         file_path = pathlib.Path(npz_path)
         data: np.lib.npyio.NpzFile = np.load(file_path, allow_pickle=True)
@@ -486,7 +511,7 @@ class TagEditorApp:
             if len(embeddings) == 0:
                 raise Exception("No face embeddings found in the database.")  # noqa: TRY002
 
-            clt = sklearn.cluster.DBSCAN(eps=eps, min_samples=min_samples, metric="cosine")
+            clt = sklearn.cluster.DBSCAN(eps=eps, min_samples=1, metric="cosine")
             clt.fit(embeddings)
 
             labels: np.ndarray = clt.labels_
