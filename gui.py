@@ -408,7 +408,7 @@ class TagEditorApp:
 
             cmd = ["exiftool", "-charset", "filename=UTF8", "-@", args_path]
             try:
-                print(cmd)
+                print(cmd, filepath)
                 output = subprocess.run(cmd, capture_output=True, check=True, text=True)
                 print(f"{output=}")
                 successful_write = any(
@@ -424,6 +424,7 @@ class TagEditorApp:
                         output.stderr,
                     )
                 ele.is_writen = True
+                ele.label.config(background="#FF9797")
             except subprocess.CalledProcessError as e:
                 details = f"stdout:\n{e.stdout}\nstderr:\n{e.stderr}"
                 _ = tkinter.messagebox.showerror(
