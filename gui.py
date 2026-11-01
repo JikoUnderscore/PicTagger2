@@ -2,6 +2,7 @@ import dataclasses
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import tkinter as tk
 import tkinter.filedialog
@@ -81,9 +82,8 @@ class ScrollableFrame(ttk.Frame):
             self.canvas.coords(window, 0, content_y)
             content_y += frame.winfo_reqheight()
 
-        self.canvas.configure(
-            scrollregion=(0, 0, canvas_width, content_y)
-        )
+        self.canvas.configure(scrollregion=(0, 0, canvas_width, content_y))
+
 
 @dataclasses.dataclass(slots=True)
 class PersonFaces:
@@ -172,7 +172,11 @@ def read_tags(filepath: str, et: exiftool.ExifToolHelper) -> list[str]:
 @typing.final
 class TagEditorApp:
     def __init__(
-        self, root: tk.Tk, et: exiftool.ExifToolHelper, selected_npz_file: str
+        self,
+        root: tk.Tk,
+        et: exiftool.ExifToolHelper,
+        selected_npz_file: str,
+        eps: float,
     ):
         self.root = root
         _ = root.bind_all("<MouseWheel>", self._scroll_person_canvas)
@@ -241,8 +245,14 @@ class TagEditorApp:
         self.next_button.grid(row=cr, column=1, sticky="ew")
 
         self.skip_enabled = tk.BooleanVar(value=False)
-        self.skip_is_written_check = ttk.Checkbutton(self.controls_tag_editor, text="Skip the check on << and >> buttons", variable=self.skip_enabled)
-        self.skip_is_written_check.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
+        self.skip_is_written_check = ttk.Checkbutton(
+            self.controls_tag_editor,
+            text="Skip the check on << and >> buttons",
+            variable=self.skip_enabled,
+        )
+        self.skip_is_written_check.grid(
+            row=(cr := cr + 1), column=0, columnspan=2, sticky="ew"
+        )
 
         # Recent Tags Panel (Column 1)
         self.recent_tags: list[str] = []
@@ -265,7 +275,7 @@ class TagEditorApp:
         self.cache_view_of_person_faces: list[View] = []
         self.index = 0
 
-        self.load_npz_file(selected_npz_file)
+        self.load_npz_file(selected_npz_file, eps)
         self.show_person()
 
     def _scroll_person_canvas(self, event: tk.Event[tk.Misc]) -> str | None:
@@ -335,7 +345,8 @@ class TagEditorApp:
         for ele in self.cache_view_of_person_faces[self.index].elements:
             if ele.is_writen == False:
                 tkinter.messagebox.showinfo(
-                    "Non writen data", "Write all data before proceeding, OR check the checkbox"
+                    "Non writen data",
+                    "Write all data before proceeding, OR check the checkbox",
                 )
                 is_writen = False
                 break
@@ -354,8 +365,8 @@ class TagEditorApp:
 
     def prev_person(self):
         if self._is_written_for_all_elements_warning() == False:
-                return
-    
+            return
+
         if self.curent_selected_listbox is not None:
             self.curent_selected_listbox.config(background=self.defaultbg)
         self.curent_selected_listbox = None
@@ -453,7 +464,7 @@ class TagEditorApp:
         section_frame: ttk.Frame | None = None
         # facebox: np.ndarray[np._any, np.dtype[np.float32]]
         assert len(person.path) == len(person.face_box)
-
+        print(len(person.path), person.path[-1])
         for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
             section_frame, section_row = scroll.content_location(row)
 
@@ -515,11 +526,7 @@ class TagEditorApp:
         self.curent_selected_listbox = e.widget
         self.curent_selected_listbox.config(background="#FF9797")
 
-    def load_npz_file(
-        self,
-        npz_path: str | pathlib.Path,
-        eps: float = 0.4,
-    ):
+    def load_npz_file(self, npz_path: str | pathlib.Path, eps: float):
         file_path = pathlib.Path(npz_path)
         data: np.lib.npyio.NpzFile = np.load(file_path, allow_pickle=True)
 
@@ -543,7 +550,7 @@ class TagEditorApp:
                     continue
 
                 indices: np.ndarray = np.where(labels == label)[0]
-                print(f"👤 Person #{label} ({len(indices)} images):")
+                # print(f"👤 Person #{label} ({len(indices)} images):", end="\r")
 
                 person = PersonFaces([], [])
                 for idx in indices:
@@ -561,7 +568,6 @@ class TagEditorApp:
                 self.persons.append(PersonFaces([path], [box]))
 
 
-
 def view_full_image_of_face(e: tk.Event[ttk.Label], views: list[View], index: int):
     for ele in views[index].elements:
         if ele.label == e.widget:
@@ -569,6 +575,18 @@ def view_full_image_of_face(e: tk.Event[ttk.Label], views: list[View], index: in
 
 
 def main():
+    if len(sys.argv) < 2:
+        print("""Usage: python gui.py [float]
+    [float] = eps (default 0.5): distance threshold (lower = stricter matching, higher = looser grouping)""")
+
+    eps = 0.3
+
+    try:
+        if len(sys.argv) > 2:
+            eps = float(sys.argv[1])
+    except Exception as e:
+        print(e)
+
     root = tk.Tk()
 
     selectec_npz_file = tkinter.filedialog.askopenfile(title="Pick a npz file")
@@ -580,7 +598,7 @@ def main():
         return
 
     with exiftool.ExifToolHelper() as et:
-        app = TagEditorApp(root, et, selectec_npz_file.name)
+        app = TagEditorApp(root, et, selectec_npz_file.name, eps)
         app.root.mainloop()
 
 
