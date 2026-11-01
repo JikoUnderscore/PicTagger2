@@ -373,19 +373,40 @@ class TagEditorApp:
             ) as argsf:
                 argsf.write("-overwrite_original\n")
                 argsf.write("-P\n")
-                argsf.write("-charset\nutf8\n")
-                argsf.write("-keywords=\n")  # clear existing
-                tags: tuple[str, ...] = ele.listbox.get(0, "end")
+                argsf.write("-charset\nUTF8\n")
+                argsf.write("-charset\nIPTC=UTF8\n")
+                argsf.write("-IPTC:CodedCharacterSet=UTF8\n")
+                argsf.write("-IPTC:Keywords=\n")
+                argsf.write("-XMP:Subject=\n")
+                argsf.write("-EXIF:XPKeywords=\n")
+                tags: tuple[str, ...] = tuple(
+                    tag for tag in ele.listbox.get(0, "end") if tag
+                )
                 for tag in tags:
-                    if tag:
-                        _ = argsf.write(f"-keywords={tag}\n")
+                    _ = argsf.write(f"-IPTC:Keywords={tag}\n")
+                    _ = argsf.write(f"-XMP:Subject={tag}\n")
+                if tags:
+                    _ = argsf.write(f"-EXIF:XPKeywords={';'.join(tags)}\n")
+                _ = argsf.write(f"{filepath}\n")
                 args_path = argsf.name
 
-            cmd = ["exiftool", "-@", args_path, filepath]
+            cmd = ["exiftool", "-charset", "filename=UTF8", "-@", args_path]
             try:
                 print(cmd)
                 output = subprocess.run(cmd, capture_output=True, check=True, text=True)
                 print(f"{output=}")
+                successful_write = any(
+                    line.rstrip().endswith("image files updated")
+                    or line.rstrip().endswith("image files unchanged")
+                    for line in output.stdout.splitlines()
+                )
+                if not successful_write:
+                    raise subprocess.CalledProcessError(
+                        output.returncode or 1,
+                        cmd,
+                        output.stdout,
+                        output.stderr,
+                    )
                 ele.is_writen = True
             except subprocess.CalledProcessError as e:
                 details = f"stdout:\n{e.stdout}\nstderr:\n{e.stderr}"
