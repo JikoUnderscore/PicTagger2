@@ -303,8 +303,13 @@ class TagEditorApp:
             return
 
         for ele in self.cache_view_of_person_faces[self.index].elements:
-            ele.listbox.insert("end", tag)
+            tags: tuple[str, ...] = tuple(
+                tag for tag in ele.listbox.get(0, "end") if tag
+            )
+            if tag not in tags:
+                ele.listbox.insert("end", tag)
             self.entry_var.set("")
+            ele.is_writen = False
 
         self._add_to_recent(tag)
 
