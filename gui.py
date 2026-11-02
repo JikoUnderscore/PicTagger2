@@ -1,3 +1,5 @@
+import concurrent.futures
+import concurrent.futures.thread
 import dataclasses
 import os
 import pathlib
@@ -103,8 +105,15 @@ class ImageElentData:
 @dataclasses.dataclass(slots=True)
 class View:
     index: int
-    frame: typing.Any
+    view_frame: ttk.Frame
     elements: list[ImageElentData]
+
+
+@dataclasses.dataclass(slots=True)
+class PreloadPerson:
+    img: PIL.Image.Image
+    path: str
+    row: int
 
 
 def resize_image(image: PIL.Image.Image, max_w: int, max_h: int) -> PIL.Image.Image:
@@ -183,7 +192,7 @@ class TagEditorApp:
         root.geometry("1280x720")
         root.title("Tag Editor")
         self.et = et
-        self.defaultbg = root.cget("bg")
+        self.defaultbg: str = root.cget("bg")
         self.curent_selected_listbox: tk.Listbox | None = None
 
         root.rowconfigure(0, weight=1)
@@ -244,6 +253,9 @@ class TagEditorApp:
         )
         self.next_button.grid(row=cr, column=1, sticky="ew")
 
+        self.current_info = ttk.Label(self.controls_tag_editor, text="Current:" )
+        self.current_info.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
+
         self.skip_enabled = tk.BooleanVar(value=False)
         self.skip_is_written_check = ttk.Checkbutton(
             self.controls_tag_editor,
@@ -275,6 +287,14 @@ class TagEditorApp:
         self.cache_view_of_person_faces: list[View] = []
         self.index = 0
 
+        self.thread_persons_preload_images: dict[int, list[PreloadPerson]] = {}
+        self.thread_working: concurrent.futures.Future[None]
+        self.thread_executor = concurrent.futures.thread.ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="self._load_person_threading",
+        )
+        self.loading_update = ""
+
         self.load_npz_file(selected_npz_file, eps)
         self.show_person()
 
@@ -304,7 +324,7 @@ class TagEditorApp:
 
         for ele in self.cache_view_of_person_faces[self.index].elements:
             tags: tuple[str, ...] = tuple(
-                tag for tag in ele.listbox.get(0, "end") if tag
+                tag for tag in typing.cast(str, ele.listbox.get(0, "end")) if tag
             )
             if tag not in tags:
                 ele.listbox.insert("end", tag)
@@ -333,10 +353,10 @@ class TagEditorApp:
 
     def remove_selected(self):
         if self.curent_selected_listbox is not None:
-            selection = self.curent_selected_listbox.curselection()
+            selection: tuple[int, ...] = self.curent_selected_listbox.curselection()
             if selection:
-                self.curent_selected_listbox.config(background=self.defaultbg)
-                self.curent_selected_listbox.delete(selection)
+                _ = self.curent_selected_listbox.config(background=self.defaultbg)
+                self.curent_selected_listbox.delete(selection[0])
                 self.curent_selected_listbox = None
         self.root.focus_force()
 
@@ -358,6 +378,13 @@ class TagEditorApp:
         return is_writen
 
     def next_person(self):
+        if self.thread_working.running():
+            tkinter.messagebox.showinfo(
+                "Loading next",
+                f"Curently next images are loading\n {self.loading_update}",
+            )
+            return
+
         if self._is_written_for_all_elements_warning() == False:
             return
 
@@ -441,39 +468,22 @@ class TagEditorApp:
         # # self.write_tags(filepath, self.current_tags)
         # # print(f"Done {filepath}")
 
-    def show_person(self):
-        for cached_view in self.cache_view_of_person_faces:
-            if self.index == cached_view.index:
-                cached_view.frame.tkraise()
-                return
+    def _load_person(self, index: int):
+        if index in self.thread_persons_preload_images:
+            return
 
-        person = self.persons[self.index]
-
-        pview = ttk.Frame(self.face_images)
-        pview.grid(row=0, column=0, sticky="nsew")
-        pview.rowconfigure(0, weight=1)
-        pview.columnconfigure(0, weight=1)
-        scroll = ScrollableFrame(pview)
-        scroll.pack(fill="both", expand=True)
-
-        # _ = view.bind(
-        #     "<MouseWheel>", lambda e: scroll.canvas.yview_scroll(-e.delta // 60, "units")
-        # )
-        # _ = pview.bind(
-        #     "<MouseWheel>", lambda e: scroll.canvas.yview_scroll(-e.delta // 60, "units")
-        # )
-        # _ = scroll.canvas.bind(
-        #     "<MouseWheel>", lambda e: scroll.canvas.yview_scroll(-e.delta // 60, "units")
-        # )
-
-        elements: list[ImageElentData] = []
-        section_frame: ttk.Frame | None = None
-        # facebox: np.ndarray[np._any, np.dtype[np.float32]]
+        person = self.persons[index]
         assert len(person.path) == len(person.face_box)
-        print(len(person.path), person.path[-1])
-        for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
-            section_frame, section_row = scroll.content_location(row)
 
+        progres_end = len(person.path)
+        progres_interval = max(1, progres_end // 5)
+
+        loading: list[PreloadPerson] = []
+        for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
+            if (row + 1) % progres_interval == 0 or (row + 1) == progres_end:
+                percent = int(((row + 1) / progres_end) * 100)
+                self.loading_update = f"Loading images #{index} {percent}% ({row + 1}/{progres_end})"
+            
             pilimg = PIL.Image.open(path)
             pil_img = PIL.ImageOps.exif_transpose(pilimg)
             img_width, img_height = pil_img.size
@@ -493,26 +503,67 @@ class TagEditorApp:
             face_crop = pil_img.crop((x1, y1, x2, y2))
 
             img = resize_image(face_crop, 320, 200)
-            tk_image_data = PIL.ImageTk.PhotoImage(img)
+            loading.append(PreloadPerson(img, path, row))
+        self.thread_persons_preload_images[index] = loading
+
+    def _load_person_threading(self, index: int):
+        self._load_person(index)
+
+    def show_person(self):
+        self.current_info.config(text="Loading current images")
+        self._load_person(self.index)
+
+        for cached_view in self.cache_view_of_person_faces:
+            if self.index == cached_view.index:
+                cached_view.view_frame.tkraise()
+                return
+
+        pview = ttk.Frame(self.face_images)
+        pview.grid(row=0, column=0, sticky="nsew")
+        pview.rowconfigure(0, weight=1)
+        pview.columnconfigure(0, weight=1)
+        scroll = ScrollableFrame(pview)
+        scroll.pack(fill="both", expand=True)
+
+        elements: list[ImageElentData] = []
+        section_frame: ttk.Frame | None = None
+
+        # progres_end = len(self.thread_persons_preload_images[self.index])
+        # progres_interval = max(1, progres_end // 10)
+
+        self.current_info.config(text="Building UI")
+        self.current_info.update()
+        for i, preloaded_person in enumerate(
+            self.thread_persons_preload_images[self.index]
+        ):
+            # if (i + 1) % progres_interval == 0 or (i + 1) == progres_end:
+            #     # percent = int(((i + 1) / progres_end) * 100)
+            #     print(f"Building UI #{self.index} {percent}% ({i + 1}/{progres_end})")
+            section_frame, section_row = scroll.content_location(preloaded_person.row)
+
+            tk_image_data = PIL.ImageTk.PhotoImage(preloaded_person.img)
 
             image_label = ttk.Label(
-                section_frame, text=path, image=tk_image_data, compound="top"
+                section_frame,
+                text=preloaded_person.path,
+                image=tk_image_data,
+                compound="top",
             )
             image_label.grid(row=section_row, column=0, padx=10)
 
             image_tag_list = tk.Listbox(section_frame, height=10)
             image_tag_list.grid(row=section_row, column=1, padx=10)
 
-            current_tags = read_tags(path, self.et)
+            current_tags = read_tags(preloaded_person.path, self.et)
             image_tag_list.delete(0, "end")
             for tag in current_tags:
                 image_tag_list.insert("end", tag)
 
-            image_tag_list.bind(
+            _ = image_tag_list.bind(
                 "<Button-1>",
                 lambda e: self.select_listbox(e),
             )
-            image_label.bind(
+            _ = image_label.bind(
                 "<Button-1>",
                 lambda e: view_full_image_of_face(
                     e, self.cache_view_of_person_faces, self.index
@@ -520,17 +571,29 @@ class TagEditorApp:
             )
 
             elements.append(
-                ImageElentData(tk_image_data, image_label, image_tag_list, False, path)
+                ImageElentData(
+                    tk_image_data,
+                    image_label,
+                    image_tag_list,
+                    False,
+                    preloaded_person.path,
+                )
             )
+        self.current_info.config(text="Current: Done UI")
+
+        self.next_button.config(text="Loading next images >>")
+        t1 = self.thread_executor.submit(self._load_person_threading, self.index + 1)
+        t1.add_done_callback(lambda e: self.next_button.config(text="Done next images >>"))
+        self.thread_working = t1
 
         self.cache_view_of_person_faces.append(View(self.index, pview, elements))
         pview.tkraise()
 
     def select_listbox(self, e: tk.Event[tk.Listbox]):
         if self.curent_selected_listbox is not None:
-            self.curent_selected_listbox.config(background=self.defaultbg)
+            _ = self.curent_selected_listbox.config(background=self.defaultbg)
         self.curent_selected_listbox = e.widget
-        self.curent_selected_listbox.config(background="#FF9797")
+        _ = self.curent_selected_listbox.config(background="#FF9797")
 
     def load_npz_file(self, npz_path: str | pathlib.Path, eps: float):
         file_path = pathlib.Path(npz_path)
@@ -590,7 +653,7 @@ def main():
     try:
         if len(sys.argv) > 2:
             eps = float(sys.argv[1])
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(e)
 
     root = tk.Tk()
