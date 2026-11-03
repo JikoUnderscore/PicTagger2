@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import tkinter as tk
 import tkinter.filedialog
 import tkinter.messagebox
@@ -253,7 +254,7 @@ class TagEditorApp:
         )
         self.next_button.grid(row=cr, column=1, sticky="ew")
 
-        self.current_info = ttk.Label(self.controls_tag_editor, text="Current:" )
+        self.current_info = ttk.Label(self.controls_tag_editor, text="" )
         self.current_info.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
 
         self.skip_enabled = tk.BooleanVar(value=False)
@@ -265,6 +266,10 @@ class TagEditorApp:
         self.skip_is_written_check.grid(
             row=(cr := cr + 1), column=0, columnspan=2, sticky="ew"
         )
+
+
+        self.current_index_info = ttk.Label(self.controls_tag_editor, text="Images index: (1/1)")
+        self.current_index_info.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
 
         # Recent Tags Panel (Column 1)
         self.recent_tags: list[str] = []
@@ -288,13 +293,12 @@ class TagEditorApp:
         self.index = 0
 
         self.thread_persons_preload_images: dict[int, list[PreloadPerson]] = {}
-        self.thread_working: concurrent.futures.Future[None]
-        self.thread_executor = concurrent.futures.thread.ThreadPoolExecutor(
+        self._preload_futures: dict[int, concurrent.futures.Future[None]] = {}
+        self.thread_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2,
-            thread_name_prefix="self._load_person_threading",
+            thread_name_prefix="background_thread",
         )
-        self.loading_update = ""
-
+        self.loading_update_info: dict[str, str] = {}
         self.load_npz_file(selected_npz_file, eps)
         self.show_person()
 
@@ -378,22 +382,48 @@ class TagEditorApp:
         return is_writen
 
     def next_person(self):
-        if self.thread_working.running():
-            tkinter.messagebox.showinfo(
-                "Loading next",
-                f"Curently next images are loading\n {self.loading_update}",
-            )
-            return
-
         if self._is_written_for_all_elements_warning() == False:
             return
+
+        next_index = self.index + 1
+        if next_index >= len(self.persons):
+            return
+
+        if next_index not in self.thread_persons_preload_images:
+            future = self._preload_futures.get(next_index)
+            if future is None:
+                self._preload_person(next_index)
+                print(len(self.loading_update_info.values()))
+                tkinter.messagebox.showinfo(
+                    "Loading next",
+                    f"The next person's images are still loading.\n {self.loading_update_info.values()}",
+                )
+                return
+
+        future = self._preload_futures.get(next_index)
+        if future is not None:
+            if not future.done():
+                print(len(self.loading_update_info.values()))
+                tkinter.messagebox.showinfo(
+                    "Loading next",
+                    f"The next person's images are still loading.\n {self.loading_update_info.values()}",
+                )
+                return
+            try:
+                future.result()
+            except Exception as error:  # noqa: BLE001
+                del self._preload_futures[next_index]
+                tkinter.messagebox.showerror(
+                    "Image loading failed", str(error)
+                )
+                return
+            del self._preload_futures[next_index]
 
         if self.curent_selected_listbox is not None:
             self.curent_selected_listbox.config(background=self.defaultbg)
         self.curent_selected_listbox = None
-        if self.index < len(self.persons) - 1:
-            self.index += 1
-            self.show_person()
+        self.index = next_index
+        self.show_person()
 
     def prev_person(self):
         if self._is_written_for_all_elements_warning() == False:
@@ -405,6 +435,7 @@ class TagEditorApp:
         if self.index > 0:
             self.index -= 1
             self.show_person()
+        self.current_index_info.config(text=f"Images index: ({self.index+1}/{len(self.persons)})")
 
     def write_all_tags(self):
         for ele in self.cache_view_of_person_faces[self.index].elements:
@@ -477,12 +508,13 @@ class TagEditorApp:
 
         progres_end = len(person.path)
         progres_interval = max(1, progres_end // 5)
-
+        name = threading.current_thread().name
+        
         loading: list[PreloadPerson] = []
         for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
             if (row + 1) % progres_interval == 0 or (row + 1) == progres_end:
                 percent = int(((row + 1) / progres_end) * 100)
-                self.loading_update = f"Loading images #{index} {percent}% ({row + 1}/{progres_end})"
+                self.loading_update_info[name] = f"{name} Loading images index:{index} {percent}% ({row + 1}/{progres_end})"
             
             pilimg = PIL.Image.open(path)
             pil_img = PIL.ImageOps.exif_transpose(pilimg)
@@ -506,12 +538,22 @@ class TagEditorApp:
             loading.append(PreloadPerson(img, path, row))
         self.thread_persons_preload_images[index] = loading
 
-    def _load_person_threading(self, index: int):
-        self._load_person(index)
+    def _preload_person(self, index: int) -> None:
+        if (
+            0 <= index < len(self.persons)
+            and index not in self.thread_persons_preload_images
+            and index not in self._preload_futures
+        ):
+            self._preload_futures[index] = self.thread_executor.submit(
+                self._load_person, index
+            )
 
     def show_person(self):
         self.current_info.config(text="Loading current images")
         self._load_person(self.index)
+
+        self._preload_person(self.index + 1)
+        self._preload_person(self.index + 2)
 
         for cached_view in self.cache_view_of_person_faces:
             if self.index == cached_view.index:
@@ -579,12 +621,8 @@ class TagEditorApp:
                     preloaded_person.path,
                 )
             )
-        self.current_info.config(text="Current: Done UI")
-
-        self.next_button.config(text="Loading next images >>")
-        t1 = self.thread_executor.submit(self._load_person_threading, self.index + 1)
-        t1.add_done_callback(lambda e: self.next_button.config(text="Done next images >>"))
-        self.thread_working = t1
+        self.current_info.config(text="Done UI")
+        self.current_index_info.config(text=f"Images index: ({self.index+1}/{len(self.persons)})")
 
         self.cache_view_of_person_faces.append(View(self.index, pview, elements))
         pview.tkraise()
