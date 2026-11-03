@@ -401,7 +401,6 @@ class TagEditorApp:
             future = self._preload_futures.get(next_index)
             if future is None:
                 self._preload_person(next_index)
-                print(len(self.loading_update_info.values()))
                 tkinter.messagebox.showinfo(
                     "Loading next",
                     f"The next person's images are still loading.\n {self.loading_update_info.values()}",
@@ -411,7 +410,6 @@ class TagEditorApp:
         future = self._preload_futures.get(next_index)
         if future is not None:
             if not future.done():
-                print(len(self.loading_update_info.values()))
                 tkinter.messagebox.showinfo(
                     "Loading next",
                     f"The next person's images are still loading.\n {self.loading_update_info.values()}",
@@ -518,13 +516,15 @@ class TagEditorApp:
         progres_interval = max(1, progres_end // 5)
         name = threading.current_thread().name
 
+
         loading: list[PreloadPerson] = []
         for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
             if (row + 1) % progres_interval == 0 or (row + 1) == progres_end:
                 percent = int(((row + 1) / progres_end) * 100)
-                self.loading_update_info[name] = (
-                    f"{name} Loading images index:{index} {percent}% ({row + 1}/{progres_end})"
-                )
+                if name != "MainThread":
+                    self.loading_update_info[name] = (
+                        f"{name} Loading images index:{index} {percent}% ({row + 1}/{progres_end})"
+                    )
 
             pilimg = PIL.Image.open(path)
             pil_img = PIL.ImageOps.exif_transpose(pilimg)
