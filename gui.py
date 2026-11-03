@@ -1,5 +1,4 @@
 import concurrent.futures
-import concurrent.futures.thread
 import dataclasses
 import os
 import pathlib
@@ -254,7 +253,13 @@ class TagEditorApp:
         )
         self.next_button.grid(row=cr, column=1, sticky="ew")
 
-        self.current_info = ttk.Label(self.controls_tag_editor, text="" )
+        self.thread_worker_0 = ttk.Label(self.controls_tag_editor, text="")
+        self.thread_worker_0.grid(row=(cr := cr + 1), column=0, sticky="ew")
+
+        self.thread_worker_1 = ttk.Label(self.controls_tag_editor, text="")
+        self.thread_worker_1.grid(row=cr, column=1, sticky="ew")
+
+        self.current_info = ttk.Label(self.controls_tag_editor, text="")
         self.current_info.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
 
         self.skip_enabled = tk.BooleanVar(value=False)
@@ -267,9 +272,12 @@ class TagEditorApp:
             row=(cr := cr + 1), column=0, columnspan=2, sticky="ew"
         )
 
-
-        self.current_index_info = ttk.Label(self.controls_tag_editor, text="Images index: (1/1)")
-        self.current_index_info.grid(row=(cr := cr + 1), column=0, columnspan=2, sticky="ew")
+        self.current_index_info = ttk.Label(
+            self.controls_tag_editor, text="Images index: (1/1)"
+        )
+        self.current_index_info.grid(
+            row=(cr := cr + 1), column=0, columnspan=2, sticky="ew"
+        )
 
         # Recent Tags Panel (Column 1)
         self.recent_tags: list[str] = []
@@ -413,9 +421,7 @@ class TagEditorApp:
                 future.result()
             except Exception as error:  # noqa: BLE001
                 del self._preload_futures[next_index]
-                tkinter.messagebox.showerror(
-                    "Image loading failed", str(error)
-                )
+                tkinter.messagebox.showerror("Image loading failed", str(error))
                 return
             del self._preload_futures[next_index]
 
@@ -435,7 +441,9 @@ class TagEditorApp:
         if self.index > 0:
             self.index -= 1
             self.show_person()
-        self.current_index_info.config(text=f"Images index: ({self.index+1}/{len(self.persons)})")
+        self.current_index_info.config(
+            text=f"Images index: ({self.index + 1}/{len(self.persons)})"
+        )
 
     def write_all_tags(self):
         for ele in self.cache_view_of_person_faces[self.index].elements:
@@ -509,13 +517,15 @@ class TagEditorApp:
         progres_end = len(person.path)
         progres_interval = max(1, progres_end // 5)
         name = threading.current_thread().name
-        
+
         loading: list[PreloadPerson] = []
         for row, (path, facebox) in enumerate(zip(person.path, person.face_box)):
             if (row + 1) % progres_interval == 0 or (row + 1) == progres_end:
                 percent = int(((row + 1) / progres_end) * 100)
-                self.loading_update_info[name] = f"{name} Loading images index:{index} {percent}% ({row + 1}/{progres_end})"
-            
+                self.loading_update_info[name] = (
+                    f"{name} Loading images index:{index} {percent}% ({row + 1}/{progres_end})"
+                )
+
             pilimg = PIL.Image.open(path)
             pil_img = PIL.ImageOps.exif_transpose(pilimg)
             img_width, img_height = pil_img.size
@@ -549,16 +559,29 @@ class TagEditorApp:
             )
 
     def show_person(self):
-        self.current_info.config(text="Loading current images")
+        self.current_info.config(text=f"Loading current images #{self.index + 1}")
         self._load_person(self.index)
-
-        self._preload_person(self.index + 1)
-        self._preload_person(self.index + 2)
 
         for cached_view in self.cache_view_of_person_faces:
             if self.index == cached_view.index:
                 cached_view.view_frame.tkraise()
+                self.current_info.config(text=f"Done #{self.index + 1} UI")
                 return
+
+        self.thread_worker_0.config(text=f"Loading images:{self.index + 2}")
+        self.thread_worker_1.config(text=f"Loading images:{self.index + 3}")
+        self._preload_person(self.index + 1)
+        self._preload_futures[self.index + 1].add_done_callback(
+            lambda e: self.thread_worker_0.config(
+                text=f"Fineshed loading:{self.index + 2}"
+            )
+        )
+        self._preload_person(self.index + 2)
+        self._preload_futures[self.index + 2].add_done_callback(
+            lambda e: self.thread_worker_1.config(
+                text=f"Fineshed loading:{self.index + 3}"
+            )
+        )
 
         pview = ttk.Frame(self.face_images)
         pview.grid(row=0, column=0, sticky="nsew")
@@ -573,7 +596,7 @@ class TagEditorApp:
         # progres_end = len(self.thread_persons_preload_images[self.index])
         # progres_interval = max(1, progres_end // 10)
 
-        self.current_info.config(text="Building UI")
+        self.current_info.config(text=f"Building #{self.index + 1} UI")
         self.current_info.update()
         for i, preloaded_person in enumerate(
             self.thread_persons_preload_images[self.index]
@@ -621,8 +644,10 @@ class TagEditorApp:
                     preloaded_person.path,
                 )
             )
-        self.current_info.config(text="Done UI")
-        self.current_index_info.config(text=f"Images index: ({self.index+1}/{len(self.persons)})")
+        self.current_info.config(text=f"Done #{self.index + 1} UI")
+        self.current_index_info.config(
+            text=f"Images index: ({self.index + 1}/{len(self.persons)})"
+        )
 
         self.cache_view_of_person_faces.append(View(self.index, pview, elements))
         pview.tkraise()
